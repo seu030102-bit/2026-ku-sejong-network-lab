@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Week 3 · Task 3 — Beat the baseline cache.
+
+Textbook §2.4.2 (caching) and §2.4.3 (TTL).
+
+`BaselineCache` below works. It is also bad, in more than one way, and one of
+its problems is worse than being slow. Find them, write `YourCache`, and prove
+the improvement with the harness:
+
+    python3 bench.py                 # baseline only
+    python3 bench.py --yours         # baseline vs. yours, side by side
+
+Rules
+-----
+* Do not change `bench.py`. If you need to change it to win, you are not
+  winning. Say so in observation.md instead.
+* `YourCache` must expose the same two methods as `BaselineCache`.
+* Speed is not the only score. The harness also counts **stale answers** -
+  times you served a record whose TTL had already run out. A cache that keeps
+  everything forever is very fast and completely wrong.
+
+Targets
+-------
+The baseline scores **325 upstream queries, 67.5% hit rate, 266 stale answers**.
+
+  pass  : zero stale answers
+  good  : zero stale, and no more upstream queries than the baseline
+  strong: the above, plus you can say in observation.md **how few upstream
+          queries a correct cache could possibly make on this workload, and
+          why you cannot go below that number**
+
+That last one is the real question. Read it before you start optimising -
+it will tell you where to stop.
+"""
+import time
+
+
+class BaselineCache:
+    """A DNS cache that somebody wrote in a hurry.
+
+    It caches. It is not correct, and it is not fast. Both are your problem.
+    """
+
+    FIXED_LIFETIME = 60          # seconds we keep anything, regardless of TTL
+
+    def __init__(self, upstream):
+        self.upstream = upstream  # upstream(name) -> (address, ttl)
+        self.entries = []         # list of [name, address, stored_at]
+
+    def lookup(self, name, now):
+        """Return an address for `name`, asking upstream only if we have to."""
+        for entry in self.entries:                      # linear scan
+            if entry[0] == name:
+                if now - entry[2] < self.FIXED_LIFETIME:
+                    return entry[1]
+                self.entries.remove(entry)
+                break
+        address, ttl = self.upstream(name)
+        self.entries.append([name, address, now])
+        return address
+
+    def stats(self):
+        return {"entries": len(self.entries)}
+
+
+class YourCache:
+    """A cache that keeps each record for the TTL the upstream actually gave.
+
+    The baseline's fixed 60 s lifetime is both of its bugs: names whose TTL is
+    shorter than 60 s are handed out after they have expired, and names whose
+    TTL is longer are thrown away early. Storing `expires_at = now + ttl` and
+    refusing to answer past that instant fixes both. A dict replaces the linear
+    scan; the harness scores upstream queries, not CPU, so the TTL is what
+    moves the numbers.
+
+    This is also the floor. Serving past the TTL is a stale answer, and
+    refreshing before the TTL only adds upstream queries. No correct cache can
+    go below the miss count this policy produces on the harness workload.
+    """
+
+    def __init__(self, upstream):
+        self.upstream = upstream
+        self.store = {}  # name -> (address, expires_at)
+
+    def lookup(self, name, now):
+        hit = self.store.get(name)
+        # The harness treats time == fetch + ttl as still fresh (stale iff t > expires).
+        if hit is not None and now <= hit[1]:
+            return hit[0]
+        address, ttl = self.upstream(name)
+        self.store[name] = (address, now + ttl)
+        return address
+
+    def stats(self):
+        return {"entries": len(self.store)}

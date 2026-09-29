@@ -1,0 +1,11 @@
+# The course template ignores out/ so student work is not pushed back to the
+# instructor repository. This personal repository is the submission, so week 3's
+# out/ is tracked. Other weeks stay ignored.
+*/out/
+!w03-dns/out/
+!w03-dns/out/**
+*.pcap
+*.pcapng
+!w03-dns/out/dns.pcapng
+__pycache__/
+*.pyc
