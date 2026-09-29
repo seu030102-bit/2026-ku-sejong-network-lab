@@ -85,10 +85,18 @@ payload, the IP endpoints, and the UDP ports are those bytes. The Ethernet
 addresses are placeholders (`02:00:00:00:00:01` and `02:00:00:00:00:02`)
 because the messages were read from the socket, not from the NIC.
 
-The textbook DNS trace (Kurose & Ross, 9th ed., `dns-wireshark-trace1-1`)
-was checked and not used. It only shows host `10.0.0.44` talking to the
-recursive resolver `75.75.75.75`, so every response is an answer and none is
-a referral.
+The textbook DNS traces were opened and not submitted as the capture.
+`dns-wireshark-trace1-1.pcapng` (563 frames, 16 DNS) is only host `10.0.0.44`
+talking to the recursive resolver `75.75.75.75`. Trace 2 and trace 3 are the
+same pattern, including one `umass.edu` response whose `NS` records sit in the
+answer section. None of the three has a referral: answer count 0 and `NS` in
+the authority section. That is why the socket exchange above is the file in
+`out/dns.pcapng`.
+
+> Wireshark lab trace files from J.F. Kurose and K.W. Ross,
+> *Computer Networking: A Top-Down Approach*, 9th ed.
+> <https://gaia.cs.umass.edu/kurose_ross/>
+> Copyright 1996-2025 J.F. Kurose, K.W. Ross. All Rights Reserved.
 
 - Matching query and response: frames **1** and **2**, transaction ID **29346**
 - Delegation: frame **2**. Answer count 0, six `NS` records in the authority section, AA bit clear. The root is handing back `.kr`, not an address
