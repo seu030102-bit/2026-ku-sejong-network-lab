@@ -4,8 +4,11 @@
 */out/
 !w03-dns/out/
 !w03-dns/out/**
+!w04-tcp/out/
+!w04-tcp/out/**
 *.pcap
 *.pcapng
 !w03-dns/out/dns.pcapng
+!w04-tcp/out/tcp.pcapng
 __pycache__/
 *.pyc

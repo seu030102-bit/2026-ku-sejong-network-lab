@@ -39,26 +39,41 @@ class FixedWindow:
 
 
 class YourControl:
-    """Your congestion control.
+    """Slow start, then hold near the bandwidth-delay product.
 
-    Things worth knowing before you start:
+    The link moves one packet per slot and the round trip is 20 slots, so about
+    20 packets fill the pipe. The queue holds 10 more and then tail-drops. A
+    window parked around 24 keeps the pipe full and the queue near 4, which is
+    under the harness caps (loss 5%, average queue 5). Textbook AIMD keeps
+    climbing until it hits that drop and then saws between half and full, so
+    its average window spends time below the pipe and its goodput falls to
+    about 82% of the fixed window.
 
-    * The link drains one packet per slot and the round trip is 20 slots, so
-      the pipe holds about 20 packets. Above that you are only filling a queue.
-    * The queue is 10 packets deep and drops from the tail. Filling it does not
-      make you faster - it makes you slower, and everybody behind you too.
-    * Cutting hard on every loss costs you throughput. Not cutting costs you
-      correctness. §3.7 is the argument about where between those to sit.
-    * You are allowed to grow differently before and after your first loss.
-      That distinction has a name in the textbook.
+    on_loss fires once per timed-out packet, and one burst can time out many
+    packets in the same slot. Halving on every one of those calls would collapse
+    the window, so a burst counts as a single loss.
     """
 
+    PIPE = 20
+    TARGET = 24
+
     def __init__(self):
-        self.window = 1
-        raise NotImplementedError("write your congestion control")
+        self.window = 1.0
+        self.ssthresh = float(self.TARGET)
+        self._cut = False
 
     def on_ack(self):
-        raise NotImplementedError
+        self._cut = False
+        if self.window < self.ssthresh:
+            self.window += 1.0
+        elif self.window < self.TARGET:
+            self.window += 1.0 / self.window
+        else:
+            self.window = float(self.TARGET)
 
     def on_loss(self):
-        raise NotImplementedError
+        if self._cut:
+            return
+        self._cut = True
+        self.ssthresh = max(self.PIPE / 2, self.window / 2)
+        self.window = max(1.0, self.window / 2)

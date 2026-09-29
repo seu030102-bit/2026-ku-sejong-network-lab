@@ -53,40 +53,77 @@ class UnreliableChannel:
 
 
 class Sender:
-    """Your sender.
+    """Stop-and-wait. One numbered chunk in flight, retransmit on silence.
 
-    Requirements are in task1.md. The short version:
-
-      - break `data` into PAYLOAD-sized pieces and number them
-      - retransmit what is not acknowledged
-      - do not assume an ACK means what you think it means until you have
-        checked the number on it
-
-    You choose the protocol: stop-and-wait is the easiest to get right and the
-    slowest; a sliding window is the point of §3.4.3. Say which you chose and
-    why in observation.md.
+    A sliding window would also pass, but a duplicate ACK and a reordered data
+    packet both show up here, and stop-and-wait makes the two failures
+    different: an ACK counts only when its number is the one in flight, and a
+    repeated data number is the receiver's problem, not a second copy of the
+    bytes. The channel keeps the packet object it was given, so each send is a
+    fresh tuple.
     """
 
+    TIMEOUT = 8
+
     def __init__(self, data_channel, ack_channel, data):
-        raise NotImplementedError("write your sender")
+        self.data_channel = data_channel
+        self.ack_channel = ack_channel
+        self.chunks = [data[i:i + PAYLOAD] for i in range(0, len(data), PAYLOAD)]
+        self.next_seq = 0
+        self.inflight = None
+        self.quiet = 0
 
     def step(self):
-        """Do one unit of work. Return False when you believe you are done."""
-        raise NotImplementedError
+        if self.next_seq >= len(self.chunks) and self.inflight is None:
+            return False
+        ack = self.ack_channel.receive()
+        while ack is not None:
+            if (isinstance(ack, tuple) and ack[0] == "ACK"
+                    and self.inflight is not None and ack[1] == self.inflight):
+                self.inflight = None
+                self.quiet = 0
+                self.next_seq += 1
+            ack = self.ack_channel.receive()
+        if self.next_seq >= len(self.chunks):
+            return False
+        if self.inflight is None:
+            self.inflight = self.next_seq
+            self.quiet = 0
+            self._send(self.inflight)
+        else:
+            self.quiet += 1
+            if self.quiet >= self.TIMEOUT:
+                self.quiet = 0
+                self._send(self.inflight)
+        return True
+
+    def _send(self, seq):
+        self.data_channel.send(("DATA", seq, self.chunks[seq]))
 
 
 class Receiver:
-    """Your receiver. Hands back the reassembled bytes via `.data()`."""
+    """Reassemble by sequence number. A duplicate is ACKed and not appended."""
 
     def __init__(self, data_channel, ack_channel):
-        raise NotImplementedError("write your receiver")
+        self.data_channel = data_channel
+        self.ack_channel = ack_channel
+        self.expected = 0
+        self.buf = bytearray()
 
     def step(self):
-        raise NotImplementedError
+        pkt = self.data_channel.receive()
+        while pkt is not None:
+            if isinstance(pkt, tuple) and pkt[0] == "DATA":
+                _, seq, payload = pkt
+                if seq == self.expected:
+                    self.buf.extend(payload)
+                    self.expected += 1
+                if seq < self.expected:
+                    self.ack_channel.send(("ACK", seq))
+            pkt = self.data_channel.receive()
 
     def data(self):
-        """The bytes reassembled so far."""
-        raise NotImplementedError
+        return bytes(self.buf)
 
 
 # ------------------------------------------------------------------- harness
