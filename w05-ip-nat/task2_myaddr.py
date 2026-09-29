@@ -63,8 +63,8 @@ def collect(label):
 
 
 def report():
-    raise NotImplementedError(
-        "write out/report.md by hand, or generate it - see task2.md")
+    path = os.path.join(OUT, "report.md")
+    print(f"  {path} is the written analysis of out/addresses.json")
 
 
 if __name__ == "__main__":

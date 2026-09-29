@@ -38,27 +38,36 @@ class LinearTable:
 
 
 class YourTable:
-    """Your table. Same three methods, same answers, fewer comparisons.
+    """One hash table per prefix length, searched from /32 down to /0.
 
-    Addresses and networks are plain 32-bit ints here - no strings, no parsing,
-    so that the benchmark measures your lookup and nothing else.
+    A lookup masks the address and probes that length's dict. The first hit is
+    the longest match, so it stops. There are 33 lengths, independent of how
+    many prefixes were inserted. Memory is one dict entry per prefix, plus 33
+    empty dicts for lengths the table never uses.
 
-    Two directions worth knowing about before you pick one:
-
-      * group by prefix length. There are only 33 possible lengths, and you can
-        ask them in an order that lets you stop early.
-      * walk the address one bit at a time. Each bit takes you to at most one
-        child, so the work is bounded by the address width, not by the table size.
-
-    The second is what hardware does. The first is easier and often enough.
-    Say which you chose and what it cost you in memory.
+    A binary trie would touch at most 32 nodes and is what hardware builds,
+    because a wire-speed lookup cannot depend on hashing. In CPython a dict
+    probe is one bytecode sequence and a trie node is an object chase, so the
+    hash tables win here even though they are the worse shape in silicon.
     """
 
     def __init__(self):
-        raise NotImplementedError("write your table")
+        self.by_length = [{} for _ in range(33)]
+        self.masks = tuple((0xFFFFFFFF << (32 - plen)) & 0xFFFFFFFF for plen in range(33))
+        self.order = []
 
     def add(self, network, prefix_len, next_hop):
-        raise NotImplementedError
+        bucket = self.by_length[prefix_len]
+        if not bucket:
+            self.order.append(prefix_len)
+            self.order.sort(reverse=True)
+        bucket[network] = next_hop
 
     def lookup(self, address):
-        raise NotImplementedError
+        by_length = self.by_length
+        masks = self.masks
+        for prefix_len in self.order:
+            hop = by_length[prefix_len].get(address & masks[prefix_len])
+            if hop is not None:
+                return hop
+        return None

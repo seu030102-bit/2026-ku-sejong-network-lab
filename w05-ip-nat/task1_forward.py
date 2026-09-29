@@ -16,6 +16,35 @@ exactly the thing you are supposed to understand this week.
 import argparse
 
 
+def _octet(text):
+    if not text.isdigit():
+        raise ValueError(f"bad octet {text!r}")
+    value = int(text)
+    if value > 255:
+        raise ValueError(f"octet out of range: {value}")
+    return value
+
+
+def parse_ipv4(text):
+    parts = text.split(".")
+    if len(parts) != 4:
+        raise ValueError(f"not an IPv4 address: {text!r}")
+    number = 0
+    for part in parts:
+        number = (number << 8) | _octet(part)
+    return number
+
+
+def _mask(prefix_len):
+    if prefix_len == 0:
+        return 0
+    return (0xFFFFFFFF << (32 - prefix_len)) & 0xFFFFFFFF
+
+
+def _format_ipv4(number):
+    return ".".join(str((number >> shift) & 0xFF) for shift in (24, 16, 8, 0))
+
+
 def parse_cidr(cidr):
     """'163.152.6.0/24' -> (network as int, prefix length).
 
@@ -23,16 +52,39 @@ def parse_cidr(cidr):
     whose host bits are set when they should not be (163.152.6.5/24 is a
     common way to write a host, but it is not a network).
     """
-    raise NotImplementedError("parse a CIDR block")
+    if "/" not in cidr:
+        raise ValueError(f"missing prefix length: {cidr!r}")
+    address, length_text = cidr.split("/", 1)
+    if not length_text.isdigit():
+        raise ValueError(f"bad prefix length: {length_text!r}")
+    prefix_len = int(length_text)
+    if prefix_len > 32:
+        raise ValueError(f"prefix length out of range: {prefix_len}")
+    network = parse_ipv4(address)
+    if network & (~_mask(prefix_len) & 0xFFFFFFFF):
+        raise ValueError(f"host bits set: {cidr}")
+    return network, prefix_len
 
 
 def network_range(cidr):
     """'163.152.6.0/24' -> (first usable, last usable, broadcast) as strings.
 
-    Careful at the edges. /31 and /32 do not have a usable host range in the
-    ordinary sense - decide what you return and say so in observation.md.
+    For a prefix of /30 or shorter the network address and the all-ones
+    address are reserved, so the usable hosts sit strictly between them.
+    /31 and /32 have no room for that. RFC 3021 makes both addresses of a
+    /31 usable hosts and removes the broadcast, and a /32 is a single host.
+    Those two cases return the addresses themselves in every slot: there is
+    no separate broadcast to report.
     """
-    raise NotImplementedError("compute the range")
+    network, prefix_len = parse_cidr(cidr)
+    broadcast = network | (~_mask(prefix_len) & 0xFFFFFFFF)
+    if prefix_len >= 31:
+        return _format_ipv4(network), _format_ipv4(broadcast), _format_ipv4(broadcast)
+    return (
+        _format_ipv4(network + 1),
+        _format_ipv4(broadcast - 1),
+        _format_ipv4(broadcast),
+    )
 
 
 class ForwardingTable:
@@ -42,14 +94,27 @@ class ForwardingTable:
 
     The default route 0.0.0.0/0 matches everything and is the shortest prefix,
     so it must lose to any other match. If two entries have the same prefix
-    length, the table is malformed - say what you do.
+    length, the table is malformed - the first next hop stays, the later one
+    is ignored.
     """
 
+    def __init__(self):
+        self.entries = []
+
     def add(self, cidr, next_hop):
-        raise NotImplementedError
+        network, prefix_len = parse_cidr(cidr)
+        for plen, net, _hop in self.entries:
+            if plen == prefix_len and net == network:
+                return
+        self.entries.append((prefix_len, network, next_hop))
 
     def lookup(self, address):
-        raise NotImplementedError
+        number = parse_ipv4(address)
+        best = None
+        for prefix_len, network, hop in self.entries:
+            if number & _mask(prefix_len) == network and (best is None or prefix_len > best[0]):
+                best = (prefix_len, hop)
+        return None if best is None else best[1]
 
 
 # ------------------------------------------------------------------- harness
